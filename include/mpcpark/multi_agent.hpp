@@ -17,6 +17,7 @@ struct TrafficAgent {
   VehicleParams vehicle;
   VecX start{};
   VecX goal{};
+  double cruise_speed = 0.8;
 };
 
 struct PassingScenario {
@@ -28,8 +29,8 @@ struct PassingScenario {
 struct DistributedOptions {
   double dt = 0.15;
   int mpc_horizon = 25;
-  int coordination_rounds = 3;
-  int settle_steps = 45;
+  int coordination_rounds = 1;
+  int settle_steps = 120;
   int max_inner_iterations = 15;
   int max_outer_iterations = 4;
 };
@@ -50,7 +51,7 @@ struct DistributedResult {
   double mean_round_ms = 0.0;
 };
 
-PassingScenario make_passing_scenario();
+PassingScenario make_parallel_parking_traffic_scenario();
 std::vector<ReferenceTrajectory> plan_agent_references(
     const PassingScenario& scenario, double dt = 0.15);
 DistributedResult simulate_distributed_ilqr(

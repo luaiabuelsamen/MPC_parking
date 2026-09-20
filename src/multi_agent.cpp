@@ -33,18 +33,21 @@ std::vector<VecX> rollout(const TrafficAgent& agent, const VecX& initial,
 
 }  // namespace
 
-PassingScenario make_passing_scenario() {
+PassingScenario make_parallel_parking_traffic_scenario() {
   PassingScenario scenario;
+  scenario.xmin = -17.0; scenario.xmax = 17.0;
+  scenario.ymin = -2.6; scenario.ymax = 10.5;
   scenario.agents = {
-      TrafficAgent{"passing", VehicleParams{}, state(-10.5, -1.55, 0.0),
-                   state(10.5, -1.55, 0.0)},
-      TrafficAgent{"oncoming", VehicleParams{}, state(10.5, 1.55, M_PI),
-                   state(-10.5, 1.55, M_PI)},
+      TrafficAgent{"parking", VehicleParams{}, state(-9.0, 3.2, 0.0),
+                   state(-1.25, 0.0, 0.0), 0.8},
+      TrafficAgent{"passing", VehicleParams{}, state(-14.0, 3.2, 0.0),
+                   state(13.0, 3.2, 0.0), 1.3},
   };
   scenario.static_obstacles = {
-      Rect::from_size(0.0, -1.55, 4.5, 1.8, 0.0, "stopped_vehicle"),
-      Rect::from_size(0.0, -5.15, 32.0, 0.5, 0.0, "road_edge_south"),
-      Rect::from_size(0.0, 5.15, 32.0, 0.5, 0.0, "road_edge_north"),
+      Rect::from_size(-5.0, 0.0, 4.5, 1.8, 0.0, "parked_car_rear"),
+      Rect::from_size(5.0, 0.0, 4.5, 1.8, 0.0, "parked_car_front"),
+      Rect::from_size(0.0, -1.9, 40.0, 1.0, 0.0, "curb"),
+      Rect::from_size(0.0, 9.0, 40.0, 2.0, 0.0, "far_wall"),
   };
   return scenario;
 }
@@ -67,6 +70,7 @@ std::vector<ReferenceTrajectory> plan_agent_references(
     }
     TrajectoryOptions trajectory_options;
     trajectory_options.dt = dt;
+    trajectory_options.cruise_speed = agent.cruise_speed;
     references.push_back(make_reference(plan, agent.start, agent.goal,
                                         agent.vehicle, trajectory_options));
   }
@@ -82,9 +86,10 @@ DistributedResult simulate_distributed_ilqr(
   if (count < 2 || static_cast<int>(references.size()) != count) {
     throw std::invalid_argument("distributed simulation requires matching agents and references");
   }
+  std::vector<ReferenceTrajectory> active_references = references;
 
   int reference_steps = 0;
-  for (const auto& reference : references) {
+  for (const auto& reference : active_references) {
     reference_steps = std::max(reference_steps,
                                static_cast<int>(reference.us.size()));
   }
@@ -93,6 +98,7 @@ DistributedResult simulate_distributed_ilqr(
       count, std::vector<VecU>(options.mpc_horizon));
   std::vector<std::vector<VecX>> predictions(count);
   std::vector<std::vector<VecU>> candidates = warm;
+  std::vector<int> cursors(count, 0);
   for (int i = 0; i < count; ++i) {
     states[i] = scenario.agents[i].start;
     for (int j = 0; j < options.mpc_horizon; ++j) {
@@ -105,12 +111,50 @@ DistributedResult simulate_distributed_ilqr(
   DistributedResult result;
   double total_round_ms = 0.0;
   int total_rounds = 0;
-  const int max_steps = reference_steps + options.settle_steps;
+  const int max_steps = reference_steps + options.settle_steps + 180;
   for (int step = 0; step < max_steps; ++step) {
+    std::vector<bool> done(count, false);
+    int active_agents = 0;
+    for (int i = 0; i < count; ++i) {
+      const int last_ref = static_cast<int>(active_references[i].xs.size()) - 1;
+      if (i == 0) {
+        // The lead vehicle owns the parking manoeuvre and therefore advances
+        // on its nominal time-indexed reference. Followers adapt around the
+        // trajectory it publishes.
+        cursors[i] = std::min(step, last_ref);
+      } else {
+        int best = cursors[i];
+        double best_score = 1e100;
+        for (int index = cursors[i];
+             index <= std::min(last_ref, cursors[i] + 15); ++index) {
+          const VecX& ref = active_references[i].xs[index];
+          const double dx = states[i](kPx) - ref(kPx);
+          const double dy = states[i](kPy) - ref(kPy);
+          const double dyaw = wrap_pi(states[i](kTheta) - ref(kTheta));
+          const double dv = states[i](kV) - ref(kV);
+          const double score = dx * dx + dy * dy + 0.5 * dyaw * dyaw +
+                               0.2 * dv * dv;
+          if (score < best_score) {
+            best_score = score;
+            best = index;
+          }
+        }
+        cursors[i] = best;
+      }
+      done[i] = cursors[i] >= last_ref - 1 &&
+                at_goal(scenario.agents[i], states[i]);
+      if (!done[i]) ++active_agents;
+    }
     const auto round_start = clock::now();
     double solve_ms = 0.0;
-    for (int round = 0; round < options.coordination_rounds; ++round) {
+    const int rounds = active_agents > 1 ? options.coordination_rounds : 1;
+    for (int round = 0; round < rounds; ++round) {
       for (int i = 0; i < count; ++i) {
+        if (done[i]) {
+          candidates[i].assign(options.mpc_horizon, VecU{});
+          predictions[i].assign(options.mpc_horizon + 1, states[i]);
+          continue;
+        }
         Problem problem;
         problem.vehicle = scenario.agents[i].vehicle;
         problem.obstacles = scenario.static_obstacles;
@@ -118,9 +162,10 @@ DistributedResult simulate_distributed_ilqr(
         problem.horizon = options.mpc_horizon;
         problem.xref.resize(problem.horizon + 1);
         problem.dynamic_obstacles.resize(problem.horizon + 1);
-        const int last_ref = static_cast<int>(references[i].xs.size()) - 1;
+        const int last_ref = static_cast<int>(active_references[i].xs.size()) - 1;
         for (int k = 0; k <= problem.horizon; ++k) {
-          problem.xref[k] = references[i].xs[std::min(step + k, last_ref)];
+          problem.xref[k] = active_references[i].xs[
+              std::min(cursors[i] + k, last_ref)];
           for (int other = 0; other < count; ++other) {
             if (other == i) continue;
             problem.dynamic_obstacles[k].push_back(vehicle_rect(
@@ -128,19 +173,19 @@ DistributedResult simulate_distributed_ilqr(
                 scenario.agents[other].name));
           }
         }
-        problem.weights.pos = i == 1 ? 4.0 : 7.0;
-        problem.weights.yaw = i == 1 ? 20.0 : 8.0;
+        problem.weights.pos = i == 0 ? 8.0 : 7.0;
+        problem.weights.yaw = i == 0 ? 10.0 : 8.0;
         problem.weights.v = 0.6;
-        problem.weights.delta = i == 1 ? 20.0 : 0.8;
-        problem.weights.accel = i == 1 ? 0.1 : 0.35;
-        problem.weights.steer_rate = i == 1 ? 20.0 : 0.4;
+        problem.weights.delta = 0.8;
+        problem.weights.accel = 0.35;
+        problem.weights.steer_rate = 0.4;
         problem.weights.term_pos = 2500.0;
         problem.weights.term_yaw = 3000.0;
         problem.weights.term_v = 300.0;
         problem.options.max_inner = options.max_inner_iterations;
         problem.options.max_outer = options.max_outer_iterations;
         problem.options.mu_init = 50.0;
-        problem.options.safety_margin = 0.70;
+        problem.options.safety_margin = i == 0 ? 0.05 : 0.70;
         ParkingSolver controller(std::move(problem));
         const Solution solution = controller.solve(states[i], warm[i]);
         candidates[i] = solution.us;
@@ -177,7 +222,7 @@ DistributedResult simulate_distributed_ilqr(
       warm[i].back() = VecU{};
       predictions[i] = rollout(scenario.agents[i], states[i], warm[i], options.dt);
     }
-    bool finished = step >= reference_steps;
+    bool finished = true;
     for (int i = 0; i < count; ++i) finished = finished && at_goal(scenario.agents[i], states[i]);
     if (finished) break;
   }

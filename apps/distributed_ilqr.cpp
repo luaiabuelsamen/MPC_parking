@@ -9,17 +9,17 @@
 int main(int argc, char** argv) {
   const std::string csv_path = argc > 1 ? argv[1] : "distributed_ilqr.csv";
   try {
-    const auto scenario = mpcpark::make_passing_scenario();
+    const auto scenario = mpcpark::make_parallel_parking_traffic_scenario();
     const auto references = mpcpark::plan_agent_references(scenario);
     const auto result =
         mpcpark::simulate_distributed_ilqr(scenario, references);
 
     std::ofstream csv(csv_path);
     if (!csv) throw std::runtime_error("cannot open output: " + csv_path);
-    csv << "t,passing_x,passing_y,passing_yaw,passing_v,passing_steer,"
-           "passing_accel,passing_steer_rate,oncoming_x,oncoming_y,"
-           "oncoming_yaw,oncoming_v,oncoming_steer,oncoming_accel,"
-           "oncoming_steer_rate,solve_ms,collision\n";
+    csv << "t,parking_x,parking_y,parking_yaw,parking_v,parking_steer,"
+           "parking_accel,parking_steer_rate,passing_x,passing_y,"
+           "passing_yaw,passing_v,passing_steer,passing_accel,"
+           "passing_steer_rate,solve_ms,collision\n";
     for (const auto& sample : result.samples) {
       csv << sample.time;
       for (size_t i = 0; i < sample.states.size(); ++i) {

@@ -38,22 +38,26 @@ def main():
         indices.append(len(samples) - 1)
 
     fig, ax = plt.subplots(figsize=(10, 4.8), dpi=100)
-    ax.set(xlim=(-14, 14), ylim=(-5.6, 5.6), aspect="equal",
+    ax.set(xlim=(-17, 17), ylim=(-2.7, 10.5), aspect="equal",
            xlabel="road position x [m]", ylabel="lateral position y [m]",
-           title="Distributed iLQR: negotiated opposing-lane pass")
+           title="Distributed iLQR: passing a parallel-parking vehicle")
     ax.set_facecolor("#555b61")
-    ax.axhline(0, color="#f6d55c", linewidth=1.5, linestyle="--")
-    ax.axhline(-3.25, color="white", linewidth=1.0)
-    ax.axhline(3.25, color="white", linewidth=1.0)
-    stopped = Polygon(rectangle(0, -1.55, 0, rear_axle=False), closed=True,
-                      facecolor="#2f3439", edgecolor="white", linewidth=1.2)
-    ax.add_patch(stopped)
-    ax.text(0, -1.55, "STOPPED", color="white", ha="center", va="center",
-            fontsize=8, weight="bold")
+    ax.axhline(4.8, color="#f6d55c", linewidth=1.5, linestyle="--")
+    ax.axhline(8.0, color="white", linewidth=1.0)
+    for parked_x in (-5.0, 5.0):
+        parked = Polygon(rectangle(parked_x, 0.0, 0, rear_axle=False),
+                         closed=True, facecolor="#2f3439", edgecolor="white",
+                         linewidth=1.2)
+        ax.add_patch(parked)
+    ax.axhspan(-2.4, -1.4, color="#a6a6a6")
+    ax.axhspan(8.0, 10.0, color="#363b40")
+    goal = Polygon(rectangle(-1.25, 0.0, 0.0), closed=True, fill=False,
+                   edgecolor="#5ee6a8", linewidth=2.0, linestyle="--")
+    ax.add_patch(goal)
 
     colors = ["#36c2f0", "#ef476f"]
-    names = ["passing agent", "oncoming agent"]
-    prefixes = ["passing", "oncoming"]
+    names = ["parking agent", "passing agent"]
+    prefixes = ["parking", "passing"]
     cars, trails = [], []
     for color, name, prefix in zip(colors, names, prefixes):
         row = samples[0]
@@ -65,10 +69,10 @@ def main():
         ax.add_patch(car)
         trail, = ax.plot([], [], color=color, linewidth=2.0, label=name)
         cars.append(car); trails.append(trail)
+    parking_x = [float(r["parking_x"]) for r in samples]
+    parking_y = [float(r["parking_y"]) for r in samples]
     passing_x = [float(r["passing_x"]) for r in samples]
     passing_y = [float(r["passing_y"]) for r in samples]
-    oncoming_x = [float(r["oncoming_x"]) for r in samples]
-    oncoming_y = [float(r["oncoming_y"]) for r in samples]
     status = ax.text(0.015, 0.965, "", transform=ax.transAxes, va="top",
                      color="#17202a", family="monospace", fontsize=9,
                      bbox=dict(boxstyle="round", facecolor="white", alpha=0.9))
@@ -77,8 +81,8 @@ def main():
     def update(frame):
         i = indices[frame]
         row = samples[i]
-        trails[0].set_data(passing_x[:i + 1], passing_y[:i + 1])
-        trails[1].set_data(oncoming_x[:i + 1], oncoming_y[:i + 1])
+        trails[0].set_data(parking_x[:i + 1], parking_y[:i + 1])
+        trails[1].set_data(passing_x[:i + 1], passing_y[:i + 1])
         for car, prefix in zip(cars, prefixes):
             car.set_xy(rectangle(float(row[prefix + "_x"]),
                                  float(row[prefix + "_y"]),

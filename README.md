@@ -32,10 +32,12 @@ run is included at [artifacts/parallel_parking.gif](artifacts/parallel_parking.g
 
 ## Distributed multi-agent iLQR
 
-The passing experiment runs two independent MPC agents. During every control
-step they exchange predicted trajectories and perform sequential iterative
-best-response updates. The passing agent may use the opposing lane around a
-stopped vehicle; the oncoming agent yields while retaining its own objective.
+The passing experiment runs two independent MPC agents. A lead vehicle slows,
+turns, and reverses into a parallel-parking slot while a faster vehicle
+approaches from behind. The parking agent publishes its predicted manoeuvre;
+the following agent optimizes around it and crosses into the opposing lane to
+pass. Different safety margins preserve clearance without making the parking
+slot artificially infeasible.
 
 ```sh
 buck2 run //:distributed_ilqr -- artifacts/distributed_ilqr.csv
