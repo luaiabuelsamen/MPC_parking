@@ -1,0 +1,32 @@
+load("@prelude//tests:test_toolchain.bzl", "noop_test_toolchain")
+load("@prelude//toolchains:cxx.bzl", "system_cxx_toolchain")
+load("@prelude//toolchains:python.bzl", "system_python_bootstrap_toolchain")
+load("@prelude//toolchains:remote_test_execution.bzl", "remote_test_execution_toolchain")
+
+# The deployment target is a Jetson/Linux host where GCC is part of the base
+# image. Keeping the tools explicit avoids Buck2's demo-toolchain assumption
+# that Clang is installed.
+system_cxx_toolchain(
+    name = "cxx",
+    archiver = "ar",
+    compiler = "gcc",
+    compiler_type = "gcc",
+    cxx_compiler = "g++",
+    linker = "g++",
+    visibility = ["PUBLIC"],
+)
+
+noop_test_toolchain(
+    name = "test",
+    visibility = ["PUBLIC"],
+)
+
+remote_test_execution_toolchain(
+    name = "remote_test_execution",
+    visibility = ["PUBLIC"],
+)
+
+system_python_bootstrap_toolchain(
+    name = "python_bootstrap",
+    visibility = ["PUBLIC"],
+)

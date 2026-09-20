@@ -1,0 +1,6 @@
+/buck-out/
+*.o
+*.csv
+*.log
+/parking.gif
+/artifacts/*.csv
