@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <limits>
+#include <stdexcept>
 
 namespace mpcpark {
 
@@ -92,6 +93,12 @@ VecU box_qp(const MatUU& H, const VecU& g, const VecU& lo, const VecU& hi,
 }
 
 ParkingSolver::ParkingSolver(Problem problem) : p_(std::move(problem)) {
+  if (p_.horizon < 1 || !std::isfinite(p_.dt) || p_.dt <= 0 ||
+      p_.vehicle.n_discs < 1 || !(p_.vehicle.wheelbase > 0) ||
+      p_.options.max_inner < 1 || p_.options.max_outer < 1 ||
+      !(p_.options.mu_init > 0)) {
+    throw std::invalid_argument("invalid iLQR problem dimensions or solver settings");
+  }
   if (static_cast<int>(p_.xref.size()) != p_.horizon + 1) {
     p_.xref.resize(p_.horizon + 1, p_.xref.empty() ? VecX{} : p_.xref.back());
   }
@@ -373,7 +380,8 @@ void ParkingSolver::rollout(const VecX& x0, const std::vector<VecX>& xs_ref,
 }
 
 Solution ParkingSolver::solve(const VecX& x0,
-                              const std::vector<VecU>& us_init) {
+                              const std::vector<VecU>& us_init,
+                              std::chrono::steady_clock::time_point deadline) {
   using clock = std::chrono::steady_clock;
   const auto t_start = clock::now();
   const int N = p_.horizon;
@@ -410,6 +418,10 @@ Solution ParkingSolver::solve(const VecX& x0,
   for (int outer = 0; outer < opt.max_outer; ++outer) {
     // --- inner loop: iLQR against the current penalty and multipliers ---
     for (int iter = 0; iter < opt.max_inner; ++iter) {
+      if (clock::now() >= deadline) {
+        sol.stats.timed_out = true;
+        break;
+      }
       ++total_inner;
       double dV[2];
       if (!backward_pass(sol.xs, sol.us, reg, k_ff, K, dV)) {
@@ -424,6 +436,10 @@ Solution ParkingSolver::solve(const VecX& x0,
       bool accepted = false;
       double new_cost = cost;
       for (double alpha = 1.0; alpha > 1e-4; alpha *= 0.5) {
+        if (clock::now() >= deadline) {
+          sol.stats.timed_out = true;
+          break;
+        }
         rollout(x0, sol.xs, sol.us, k_ff, K, alpha, xs_new, us_new);
         double viol = 0.0;
         new_cost = trajectory_cost(xs_new, us_new, viol);
@@ -438,6 +454,8 @@ Solution ParkingSolver::solve(const VecX& x0,
         }
       }
 
+      if (sol.stats.timed_out) break;
+
       if (accepted) {
         reg = std::max(opt.reg_min, reg / 2.0);
         const double rel = (cost - new_cost) / std::max(1.0, std::fabs(cost));
@@ -449,6 +467,8 @@ Solution ParkingSolver::solve(const VecX& x0,
         if (reg >= opt.reg_max) break;
       }
     }
+
+    if (sol.stats.timed_out) break;
 
     // --- outer loop: multiplier and penalty update ---
     max_violation = 0.0;

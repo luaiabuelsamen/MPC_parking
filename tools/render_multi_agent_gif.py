@@ -90,6 +90,8 @@ def main():
         collision = int(row["collision"])
         status.set_text(f"t = {float(row['t']):5.1f} s\n"
                         f"coordination = {float(row['solve_ms']):6.1f} ms\n"
+                        f"clearance = {float(row['clearance']):4.2f} m\n"
+                        f"mode = {'BRAKE' if int(row.get('fallback', 0)) else 'MPC'}\n"
                         f"collision = {'YES' if collision else 'no'}")
         return tuple(trails + cars + [status])
 

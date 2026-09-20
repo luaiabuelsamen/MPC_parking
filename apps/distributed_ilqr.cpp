@@ -19,7 +19,7 @@ int main(int argc, char** argv) {
     csv << "t,parking_x,parking_y,parking_yaw,parking_v,parking_steer,"
            "parking_accel,parking_steer_rate,passing_x,passing_y,"
            "passing_yaw,passing_v,passing_steer,passing_accel,"
-           "passing_steer_rate,solve_ms,clearance,deadline_miss,collision\n";
+           "passing_steer_rate,solve_ms,clearance,deadline_miss,collision,fallback,rounds\n";
     for (const auto& sample : result.samples) {
       csv << sample.time;
       for (size_t i = 0; i < sample.states.size(); ++i) {
@@ -31,14 +31,20 @@ int main(int argc, char** argv) {
             << u(mpcpark::kSteerRate);
       }
       csv << ',' << sample.solve_ms << ',' << sample.clearance << ','
-          << sample.deadline_miss << ',' << sample.collision << '\n';
+          << sample.deadline_miss << ',' << sample.collision << ','
+          << sample.fallback << ',' << sample.rounds << '\n';
     }
 
     std::cout << std::fixed << std::setprecision(3)
               << "samples=" << result.samples.size()
               << " mean_coordination_ms=" << result.mean_round_ms
               << " max_coordination_ms=" << result.max_round_ms
+              << " p95_ms=" << result.p95_round_ms
+              << " fallback_steps=" << result.fallback_steps
+              << " safety_stop=" << result.safety_stop
+              << " static_clearance_m=" << result.min_static_clearance
               << " deadline_misses=" << result.deadline_misses
+              << " solver_timeouts=" << result.solver_timeouts
               << " min_clearance_m=" << result.min_clearance
               << " collision=" << result.collision
               << " success=" << result.success;

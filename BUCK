@@ -1,10 +1,13 @@
+SANITIZER_FLAGS = ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"] if read_config("mpcpark", "sanitizers", "false") == "true" else []
+
 CXX_FLAGS = [
     "-std=c++17",
     "-pthread",
+    "-O2",
     "-Wall",
     "-Wextra",
     "-Wpedantic",
-]
+] + SANITIZER_FLAGS
 
 cxx_library(
     name = "mpcpark",
@@ -14,14 +17,16 @@ cxx_library(
         "src/multi_agent.cpp",
         "src/planner.cpp",
         "src/scenario.cpp",
+        "src/safety.cpp",
         "src/simulator.cpp",
         "src/trajectory.cpp",
         "src/vehicle.cpp",
     ],
-    headers = glob(["include/**/*.hpp"]),
-    public_include_directories = ["include"],
+    exported_headers = {path.removeprefix("include/"): path for path in glob(["include/**/*.hpp"])},
+    header_namespace = "",
+    exported_linker_flags = ["-pthread"] + SANITIZER_FLAGS,
     compiler_flags = CXX_FLAGS,
-    tests = [":mpcpark_tests"],
+    tests = [":mpcpark_tests", ":safety_tests"],
     visibility = ["PUBLIC"],
 )
 
@@ -56,6 +61,13 @@ cxx_binary(
 cxx_test(
     name = "mpcpark_tests",
     srcs = ["tests/mpcpark_tests.cpp"],
+    compiler_flags = CXX_FLAGS,
+    deps = [":mpcpark"],
+)
+
+cxx_test(
+    name = "safety_tests",
+    srcs = ["tests/safety_tests.cpp"],
     compiler_flags = CXX_FLAGS,
     deps = [":mpcpark"],
 )

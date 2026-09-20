@@ -10,6 +10,7 @@
 //              slot it does not initially fit in.
 #pragma once
 
+#include <chrono>
 #include <vector>
 
 #include "mpcpark/geometry.hpp"
@@ -67,6 +68,7 @@ struct SolveStats {
   int outer_iters = 0;
   int inner_iters = 0;
   bool converged = false;
+  bool timed_out = false;
   double solve_ms = 0.0;
 };
 
@@ -84,7 +86,11 @@ class ParkingSolver {
   // or the wrong length it is replaced by zeros. Multipliers persist between
   // calls unless reset_duals() is called, which is what makes the receding
   // horizon cheap.
-  Solution solve(const VecX& x0, const std::vector<VecU>& us_init);
+  // Cooperative deadline: checked between iterations and line-search trials.
+  // One derivative/rollout pass can still run past this time.
+  Solution solve(const VecX& x0, const std::vector<VecU>& us_init,
+                 std::chrono::steady_clock::time_point deadline =
+                     std::chrono::steady_clock::time_point::max());
 
   void set_reference(std::vector<VecX> xref);
   void reset_duals();

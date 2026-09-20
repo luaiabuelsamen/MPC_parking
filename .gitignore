@@ -4,3 +4,5 @@
 *.log
 /parking.gif
 /artifacts/*.csv
+__pycache__/
+*.pyc

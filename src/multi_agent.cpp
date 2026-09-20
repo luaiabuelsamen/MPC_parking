@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <future>
+#include <limits>
 #include <stdexcept>
 
 #include "mpcpark/planner.hpp"
@@ -87,6 +88,42 @@ DistributedResult simulate_distributed_ilqr(
   if (count < 2 || static_cast<int>(references.size()) != count) {
     throw std::invalid_argument("distributed simulation requires matching agents and references");
   }
+  if (!std::isfinite(options.dt) || options.dt <= 0 || options.mpc_horizon < 2 ||
+      options.coordination_rounds < 1 || options.integration_substeps < 1 ||
+      options.max_inner_iterations < 1 || options.max_outer_iterations < 1 ||
+      !std::isfinite(options.deadline_ms) || options.deadline_ms <= 0 ||
+      !std::isfinite(options.plant_wheelbase_scale) || options.plant_wheelbase_scale <= 0 ||
+      options.fault_steps < 0 || options.max_steps < 0 || options.settle_steps < 0) {
+    throw std::invalid_argument("invalid distributed controller options");
+  }
+  for (const auto& reference : references) {
+    if (reference.us.empty() || reference.xs.size() != reference.us.size() + 1 ||
+        !std::isfinite(reference.dt) || std::fabs(reference.dt - options.dt) > 1e-9) {
+      throw std::invalid_argument("reference dimensions or dt do not match controller");
+    }
+    for (const auto& x : reference.xs)
+      for (double value : x.d)
+        if (!std::isfinite(value)) throw std::invalid_argument("nonfinite reference");
+    for (const auto& u : reference.us)
+      for (double value : u.d)
+        if (!std::isfinite(value)) throw std::invalid_argument("nonfinite controls");
+  }
+  for (const auto& agent : scenario.agents) {
+    const auto& v = agent.vehicle;
+    for (double value : {v.wheelbase, v.length, v.width, v.a_max, v.steer_rate_max,
+                         v.delta_max, v.v_min, v.v_max, v.rear_overhang})
+      if (!std::isfinite(value)) throw std::invalid_argument("nonfinite vehicle parameter");
+    for (double value : agent.start.d)
+      if (!std::isfinite(value)) throw std::invalid_argument("nonfinite initial state");
+    for (double value : agent.goal.d)
+      if (!std::isfinite(value)) throw std::invalid_argument("nonfinite goal");
+    if (!(v.wheelbase > 0 && v.length > 0 && v.width > 0 && v.a_max > 0 &&
+          v.steer_rate_max > 0 && v.delta_max > 0 && v.delta_max < M_PI_2 &&
+          v.v_min < 0 && v.v_max > 0 && v.n_discs > 0))
+      throw std::invalid_argument("invalid vehicle parameters");
+  }
+  PassingScenario plant = scenario;
+  for (auto& agent : plant.agents) agent.vehicle.wheelbase *= options.plant_wheelbase_scale;
   std::vector<ReferenceTrajectory> active_references = references;
 
   int reference_steps = 0;
@@ -110,11 +147,19 @@ DistributedResult simulate_distributed_ilqr(
   }
 
   DistributedResult result;
-  result.min_clearance = 1e100;
+  result.min_clearance = result.min_static_clearance =
+      std::numeric_limits<double>::infinity();
+  std::vector<double> latencies;
   double total_round_ms = 0.0;
   int total_rounds = 0;
-  const int max_steps = reference_steps + options.settle_steps + 180;
+  int exchanges = 0;
+  int parking_tick = 0;
+  const int max_steps = options.max_steps > 0 ? options.max_steps :
+      reference_steps + options.settle_steps + 180;
   for (int step = 0; step < max_steps; ++step) {
+    const auto round_start = clock::now();
+    const auto deadline = round_start + std::chrono::duration_cast<clock::duration>(
+        std::chrono::duration<double, std::milli>(options.deadline_ms * 0.9));
     std::vector<bool> done(count, false);
     int active_agents = 0;
     for (int i = 0; i < count; ++i) {
@@ -123,7 +168,7 @@ DistributedResult simulate_distributed_ilqr(
         // The lead vehicle owns the parking manoeuvre and therefore advances
         // on its nominal time-indexed reference. Followers adapt around the
         // trajectory it publishes.
-        cursors[i] = std::min(step, last_ref);
+        cursors[i] = std::min(parking_tick, last_ref);
       } else {
         int best = cursors[i];
         double best_score = 1e100;
@@ -147,16 +192,21 @@ DistributedResult simulate_distributed_ilqr(
                 at_goal(scenario.agents[i], states[i]);
       if (!done[i]) ++active_agents;
     }
-    const auto round_start = clock::now();
     const int rounds = active_agents > 1 ? options.coordination_rounds : 1;
+    int executed_rounds = 0;
+    bool timed_out = false;
     for (int round = 0; round < rounds; ++round) {
       const auto prediction_snapshot = predictions;
       std::vector<std::future<Solution>> futures(count);
       std::vector<bool> launched(count, false);
       for (int i = 0; i < count; ++i) {
         if (done[i]) {
-          candidates[i].assign(options.mpc_horizon, VecU{});
-          predictions[i].assign(options.mpc_horizon + 1, states[i]);
+          VecX stopped = states[i];
+          for (int k = 0; k < options.mpc_horizon; ++k) {
+            candidates[i][k] = braking_control(scenario.agents[i].vehicle, stopped, options.dt);
+            stopped = step_rk4(scenario.agents[i].vehicle, stopped, candidates[i][k], options.dt);
+          }
+          predictions[i] = rollout(scenario.agents[i], states[i], candidates[i], options.dt);
           continue;
         }
         launched[i] = true;
@@ -194,61 +244,88 @@ DistributedResult simulate_distributed_ilqr(
           problem.options.mu_init = 50.0;
           problem.options.safety_margin = i == 0 ? 0.05 : 0.70;
           ParkingSolver controller(std::move(problem));
-          return controller.solve(states[i], warm[i]);
+          return controller.solve(states[i], warm[i], deadline);
         });
       }
       for (int i = 0; i < count; ++i) {
         if (!launched[i]) continue;
         const Solution solution = futures[i].get();
+        timed_out = timed_out || solution.stats.timed_out;
         candidates[i] = solution.us;
         predictions[i] = solution.xs;
       }
-    }
-    const double coordination_ms = std::chrono::duration<double, std::milli>(
-                                       clock::now() - round_start).count();
-    total_round_ms += coordination_ms;
-    result.max_round_ms = std::max(result.max_round_ms, coordination_ms);
-    const bool deadline_miss = coordination_ms > options.deadline_ms;
-    if (deadline_miss) ++result.deadline_misses;
-    ++total_rounds;
-
-    bool collision = false;
-    double clearance = 1e100;
-    for (int i = 0; i < count; ++i) {
-      collision = collision || in_collision(scenario.agents[i].vehicle, states[i],
-                                            scenario.static_obstacles);
-      for (int j = i + 1; j < count; ++j) {
-        const Rect first = vehicle_rect(scenario.agents[i].vehicle, states[i]);
-        const Rect second = vehicle_rect(scenario.agents[j].vehicle, states[j]);
-        collision = collision || rects_overlap(first, second);
-        clearance = std::min(clearance, rect_distance(first, second));
+      ++executed_rounds;
+      double change = 0.0;
+      for (int i = 0; i < count; ++i) {
+        warm[i] = candidates[i];
+        for (int k = 0; k <= options.mpc_horizon; ++k) {
+          change = std::max(change, (predictions[i][k] - prediction_snapshot[i][k]).max_abs());
+        }
       }
+      if (timed_out || change < 0.03) break;
     }
-    result.min_clearance = std::min(result.min_clearance, clearance);
     std::vector<VecU> applied(count);
     for (int i = 0; i < count; ++i) {
-      if (!deadline_miss) {
-        applied[i] = candidates[i].front();
-      } else {
-        applied[i](kAccel) = clampd(-states[i](kV) / options.dt,
-                                    -scenario.agents[i].vehicle.a_max,
-                                    scenario.agents[i].vehicle.a_max);
-        applied[i](kSteerRate) = clampd(
-            -states[i](kDelta) / options.dt,
-            -scenario.agents[i].vehicle.steer_rate_max,
-            scenario.agents[i].vehicle.steer_rate_max);
-      }
+      applied[i] = candidates[i].front();
+      if (!std::isfinite(applied[i](kAccel)) || !std::isfinite(applied[i](kSteerRate)))
+        continue;  // Do not let clampd hide a NaN from the supervisor.
+      const auto& v = scenario.agents[i].vehicle;
+      // Bound the integrated actuator states as well as command magnitudes.
+      applied[i](kAccel) = clampd(applied[i](kAccel),
+          std::max(-v.a_max, (v.v_min - states[i](kV)) / options.dt),
+          std::min(v.a_max, (v.v_max - states[i](kV)) / options.dt));
+      applied[i](kSteerRate) = clampd(applied[i](kSteerRate),
+          std::max(-v.steer_rate_max, (-v.delta_max - states[i](kDelta)) / options.dt),
+          std::min(v.steer_rate_max, (v.delta_max - states[i](kDelta)) / options.dt));
     }
+    auto checked = check_motion(scenario, states, applied, options.dt, options.integration_substeps);
+    const bool budget_expired = timed_out || clock::now() >= deadline;
+    result.solver_timeouts += budget_expired;
+    const bool injected = options.fault_start_step >= 0 && step >= options.fault_start_step &&
+                         step - options.fault_start_step < options.fault_steps;
+    result.injected_faults += injected;
+    const bool rejected = !checked.safe();
+    result.safety_rejections += rejected;
+    const bool fallback = budget_expired || injected || rejected;
+    if (fallback) {
+      ++result.fallback_steps;
+      for (int i = 0; i < count; ++i)
+        applied[i] = braking_control(scenario.agents[i].vehicle, states[i], options.dt);
+      checked = check_motion(scenario, states, applied, options.dt, options.integration_substeps);
+    }
+    const double coordination_ms = std::chrono::duration<double, std::milli>(
+        clock::now() - round_start).count();
+    const bool deadline_miss = coordination_ms > options.deadline_ms;
+    result.deadline_misses += deadline_miss;
+    result.max_round_ms = std::max(result.max_round_ms, coordination_ms);
+    total_round_ms += coordination_ms;
+    latencies.push_back(coordination_ms);
+    ++total_rounds;
+    exchanges += executed_rounds;
+    if (!checked.safe()) {
+      // No safe command was found. Terminate at the measured state rather
+      // than execute an unsafe fallback or silently label it collision-free.
+      result.safety_stop = true;
+      break;
+    }
+    // The supervisor knows only the nominal model. Mismatch belongs in the
+    // plant, and is assessed after application rather than used as an oracle.
+    checked = check_motion(plant, states, applied, options.dt, options.integration_substeps);
+    result.min_clearance = std::min(result.min_clearance, checked.min_clearance);
+    result.min_static_clearance = std::min(result.min_static_clearance, checked.min_static_clearance);
     result.samples.push_back(MultiAgentSample{
-        step * options.dt, states, applied, coordination_ms, clearance,
-        deadline_miss, collision});
-    result.collision = result.collision || collision;
-
+        step * options.dt, states, applied, coordination_ms, checked.min_clearance,
+        deadline_miss, checked.collision, fallback, executed_rounds});
+    result.collision = result.collision || checked.collision;
+    states = std::move(checked.states);
+    if (!checked.safe()) {
+      result.safety_stop = true;
+      break;
+    }
+    if (!fallback) ++parking_tick;
     for (int i = 0; i < count; ++i) {
-      states[i] = step_rk4(scenario.agents[i].vehicle, states[i], applied[i],
-                           options.dt);
       for (int k = 0; k + 1 < options.mpc_horizon; ++k) {
-        warm[i][k] = candidates[i][k + 1];
+        warm[i][k] = fallback ? VecU{} : candidates[i][k + 1];
       }
       warm[i].back() = VecU{};
       predictions[i] = rollout(scenario.agents[i], states[i], warm[i], options.dt);
@@ -258,15 +335,35 @@ DistributedResult simulate_distributed_ilqr(
     if (finished) break;
   }
 
+  // Only inspect the current geometry here, not the hypothetical coast after
+  // stopping the experiment. It was already checked at the last plant substep.
+  double final_clearance = std::numeric_limits<double>::infinity();
+  bool final_collision = false;
+  for (int i = 0; i < count; ++i) {
+    const Rect body = vehicle_rect(plant.agents[i].vehicle, states[i]);
+    for (const auto& obstacle : plant.static_obstacles)
+      result.min_static_clearance = std::min(result.min_static_clearance, rect_distance(body, obstacle));
+    final_collision = final_collision || in_collision(plant.agents[i].vehicle, states[i], plant.static_obstacles);
+    for (int j = 0; j < i; ++j) {
+      const Rect other = vehicle_rect(plant.agents[j].vehicle, states[j]);
+      final_collision = final_collision || rects_overlap(body, other);
+      final_clearance = std::min(final_clearance, rect_distance(body, other));
+    }
+  }
+  result.min_clearance = std::min(result.min_clearance, final_clearance);
+  result.collision = result.collision || final_collision;
   result.samples.push_back(MultiAgentSample{
       result.samples.size() * options.dt, states, std::vector<VecU>(count), 0.0,
-      result.min_clearance, false, false});
+      final_clearance, false, final_collision});
   for (int i = 0; i < count; ++i) {
     result.final_errors.push_back(goal_error(states[i], scenario.agents[i].goal));
   }
-  result.success = !result.collision;
+  result.success = !result.collision && !result.safety_stop;
   for (int i = 0; i < count; ++i) result.success = result.success && at_goal(scenario.agents[i], states[i]);
   result.mean_round_ms = total_rounds > 0 ? total_round_ms / total_rounds : 0.0;
+  result.mean_rounds = total_rounds > 0 ? static_cast<double>(exchanges) / total_rounds : 0.0;
+  std::sort(latencies.begin(), latencies.end());
+  if (!latencies.empty()) result.p95_round_ms = latencies[static_cast<size_t>(0.95 * (latencies.size() - 1))];
   return result;
 }
 
