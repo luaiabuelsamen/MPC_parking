@@ -94,14 +94,18 @@ bool rects_overlap(const Rect& a, const Rect& b) {
 
 bool in_collision(const VehicleParams& vp, const VecX& x,
                   const std::vector<Rect>& obstacles) {
-  const Rect car = Rect::from_size(
-      x(kPx) + (0.5 * vp.length - vp.rear_overhang) * std::cos(x(kTheta)),
-      x(kPy) + (0.5 * vp.length - vp.rear_overhang) * std::sin(x(kTheta)),
-      vp.length, vp.width, x(kTheta), "ego");
+  const Rect car = vehicle_rect(vp, x, "ego");
   for (const Rect& o : obstacles) {
     if (rects_overlap(car, o)) return true;
   }
   return false;
+}
+
+Rect vehicle_rect(const VehicleParams& vp, const VecX& x, std::string label) {
+  return Rect::from_size(
+      x(kPx) + (0.5 * vp.length - vp.rear_overhang) * std::cos(x(kTheta)),
+      x(kPy) + (0.5 * vp.length - vp.rear_overhang) * std::sin(x(kTheta)),
+      vp.length, vp.width, x(kTheta), std::move(label));
 }
 
 }  // namespace mpcpark

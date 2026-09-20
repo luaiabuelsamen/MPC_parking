@@ -95,6 +95,13 @@ ParkingSolver::ParkingSolver(Problem problem) : p_(std::move(problem)) {
   if (static_cast<int>(p_.xref.size()) != p_.horizon + 1) {
     p_.xref.resize(p_.horizon + 1, p_.xref.empty() ? VecX{} : p_.xref.back());
   }
+  if (static_cast<int>(p_.dynamic_obstacles.size()) != p_.horizon + 1) {
+    p_.dynamic_obstacles.resize(p_.horizon + 1);
+  }
+  for (const auto& stage : p_.dynamic_obstacles) {
+    max_dynamic_obstacles_ =
+        std::max(max_dynamic_obstacles_, static_cast<int>(stage.size()));
+  }
   reset_duals();
 }
 
@@ -106,7 +113,9 @@ void ParkingSolver::set_reference(std::vector<VecX> xref) {
 }
 
 int ParkingSolver::num_constraints() const {
-  return p_.vehicle.n_discs * static_cast<int>(p_.obstacles.size()) + 4;
+  return p_.vehicle.n_discs *
+             (static_cast<int>(p_.obstacles.size()) + max_dynamic_obstacles_) +
+         4;
 }
 
 void ParkingSolver::reset_duals() {
@@ -117,11 +126,19 @@ void ParkingSolver::reset_duals() {
 
 void ParkingSolver::constraints(const VecX& x, std::vector<double>& c,
                                 std::vector<VecX>& dc) const {
+  constraints_at(0, x, c, dc);
+}
+
+void ParkingSolver::constraints_at(int stage, const VecX& x,
+                                   std::vector<double>& c,
+                                   std::vector<VecX>& dc) const {
   const int nc = num_constraints();
   c.assign(nc, 0.0);
   dc.assign(nc, VecX{});
 
   const double r = p_.vehicle.disc_radius() + p_.options.safety_margin;
+  const int bounded_stage = std::max(0, std::min(stage, p_.horizon));
+  const auto& moving = p_.dynamic_obstacles[bounded_stage];
   int idx = 0;
   for (int d = 0; d < p_.vehicle.n_discs; ++d) {
     const Vec2 pc = disc_center(p_.vehicle, x, d);
@@ -130,6 +147,17 @@ void ParkingSolver::constraints(const VecX& x, std::vector<double>& c,
       Vec2 g{};
       const double sd = rect_sdf_grad(o, pc, g);
       // Clearance constraint: r - sd <= 0.
+      c[idx] = r - sd;
+      dc[idx] = -1.0 * (J.transpose() * g);
+      ++idx;
+    }
+    for (int obstacle = 0; obstacle < max_dynamic_obstacles_; ++obstacle) {
+      if (obstacle >= static_cast<int>(moving.size())) {
+        c[idx++] = -1e6;
+        continue;
+      }
+      Vec2 g{};
+      const double sd = rect_sdf_grad(moving[obstacle], pc, g);
       c[idx] = r - sd;
       dc[idx] = -1.0 * (J.transpose() * g);
       ++idx;
@@ -184,7 +212,7 @@ double ParkingSolver::trajectory_cost(const std::vector<VecX>& xs,
                      w.term_delta * e(kDelta) * e(kDelta));
     }
     if (k == 0) continue;  // the initial state is fixed; penalising it is moot
-    constraints(xs[k], c, dc);
+    constraints_at(k, xs[k], c, dc);
     for (size_t i = 0; i < c.size(); ++i) {
       const double lam = lambda_[k][i];
       const double t = lam + mu_ * c[i];
@@ -223,7 +251,7 @@ bool ParkingSolver::backward_pass(const std::vector<VecX>& xs,
     Vx(i) = qf_diag(i) * eN(i);
     Vxx(i, i) = qf_diag(i);
   }
-  constraints(xs[N], c, dc);
+  constraints_at(N, xs[N], c, dc);
   for (size_t i = 0; i < c.size(); ++i) {
     const double t = lambda_[N][i] + mu_ * c[i];
     if (t <= 0.0) continue;
@@ -252,7 +280,7 @@ bool ParkingSolver::backward_pass(const std::vector<VecX>& xs,
       lxx(i, i) = qx_diag(i);
     }
     if (k > 0) {
-      constraints(xs[k], c, dc);
+      constraints_at(k, xs[k], c, dc);
       for (size_t i = 0; i < c.size(); ++i) {
         const double t = lambda_[k][i] + mu_ * c[i];
         if (t <= 0.0) continue;
@@ -425,7 +453,7 @@ Solution ParkingSolver::solve(const VecX& x0,
     // --- outer loop: multiplier and penalty update ---
     max_violation = 0.0;
     for (int k = 1; k <= N; ++k) {
-      constraints(sol.xs[k], c, dc);
+      constraints_at(k, sol.xs[k], c, dc);
       for (size_t i = 0; i < c.size(); ++i) {
         lambda_[k][i] = std::max(0.0, lambda_[k][i] + mu_ * c[i]);
         max_violation = std::max(max_violation, c[i]);

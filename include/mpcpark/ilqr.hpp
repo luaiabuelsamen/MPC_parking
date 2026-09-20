@@ -51,6 +51,9 @@ struct SolverOptions {
 struct Problem {
   VehicleParams vehicle;
   std::vector<Rect> obstacles;
+  // Predicted moving obstacles at each state stage. Each stage may contain
+  // fewer entries than the maximum; missing entries are treated as inactive.
+  std::vector<std::vector<Rect>> dynamic_obstacles;
   double dt = 0.1;
   int horizon = 40;             // N steps, so N+1 states
   std::vector<VecX> xref;       // size N+1; the last entry is the goal pose
@@ -90,6 +93,8 @@ class ParkingSolver {
   // Exposed for testing: constraint values and Jacobians at a state.
   void constraints(const VecX& x, std::vector<double>& c,
                    std::vector<VecX>& dc) const;
+  void constraints_at(int stage, const VecX& x, std::vector<double>& c,
+                      std::vector<VecX>& dc) const;
   int num_constraints() const;
 
  private:
@@ -105,6 +110,7 @@ class ParkingSolver {
                std::vector<VecX>& xs, std::vector<VecU>& us) const;
 
   Problem p_;
+  int max_dynamic_obstacles_ = 0;
   double mu_ = 0.0;
   std::vector<std::vector<double>> lambda_;  // [stage][constraint]
 };

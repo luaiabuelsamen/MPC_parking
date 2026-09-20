@@ -55,6 +55,26 @@ void test_geometry() {
           "rectangle inside distance");
 }
 
+void test_dynamic_obstacle_constraints() {
+  mpcpark::Problem problem;
+  problem.horizon = 1;
+  problem.xref.resize(2);
+  problem.dynamic_obstacles.resize(2);
+  problem.dynamic_obstacles[0].push_back(
+      mpcpark::Rect::from_size(1.25, 0.0, 4.5, 1.8, 0.0));
+  problem.dynamic_obstacles[1] = problem.dynamic_obstacles[0];
+  mpcpark::ParkingSolver solver(problem);
+  require(solver.num_constraints() == problem.vehicle.n_discs + 4,
+          "dynamic obstacle constraint count");
+  std::vector<double> constraints;
+  std::vector<mpcpark::VecX> gradients;
+  solver.constraints_at(0, mpcpark::VecX{}, constraints, gradients);
+  bool violated = false;
+  for (int i = 0; i < problem.vehicle.n_discs; ++i)
+    violated = violated || constraints[i] > 0.0;
+  require(violated, "overlapping moving vehicle was not constrained");
+}
+
 void test_planner_scenarios() {
   for (const auto& name : mpcpark::scenario_names()) {
     const auto s = mpcpark::make_scenario(name);
@@ -81,6 +101,7 @@ int main() {
   try {
     test_rk4_jacobian();
     test_geometry();
+    test_dynamic_obstacle_constraints();
     test_planner_scenarios();
     std::cout << "all tests passed\n";
     return 0;

@@ -30,6 +30,20 @@ python3 tools/render_gif.py --scenario parallel \
 GIF rendering requires Python 3, Matplotlib, and Pillow. An example closed-loop
 run is included at [artifacts/parallel_parking.gif](artifacts/parallel_parking.gif).
 
+## Distributed multi-agent iLQR
+
+The passing experiment runs two independent MPC agents. During every control
+step they exchange predicted trajectories and perform sequential iterative
+best-response updates. The passing agent may use the opposing lane around a
+stopped vehicle; the oncoming agent yields while retaining its own objective.
+
+```sh
+buck2 run //:distributed_ilqr -- artifacts/distributed_ilqr.csv
+python3 tools/render_multi_agent_gif.py \
+  --trajectory artifacts/distributed_ilqr.csv \
+  --output artifacts/distributed_ilqr.gif
+```
+
 Use `perpendicular` or `garage` for the other scenes. `--plan-only` runs just
 Hybrid A*, which is useful when tuning the search. CSV output contains the
 state and control at every time step.

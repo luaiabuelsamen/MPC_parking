@@ -41,6 +41,8 @@ double rect_sdf_grad(const Rect& r, const Vec2& p, Vec2& grad);
 // the benchmark.
 bool in_collision(const VehicleParams& vp, const VecX& x,
                   const std::vector<Rect>& obstacles);
+Rect vehicle_rect(const VehicleParams& vp, const VecX& x,
+                  std::string label = "vehicle");
 bool rects_overlap(const Rect& a, const Rect& b);
 
 }  // namespace mpcpark
