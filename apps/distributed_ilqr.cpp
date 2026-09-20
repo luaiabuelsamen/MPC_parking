@@ -19,7 +19,7 @@ int main(int argc, char** argv) {
     csv << "t,parking_x,parking_y,parking_yaw,parking_v,parking_steer,"
            "parking_accel,parking_steer_rate,passing_x,passing_y,"
            "passing_yaw,passing_v,passing_steer,passing_accel,"
-           "passing_steer_rate,solve_ms,collision\n";
+           "passing_steer_rate,solve_ms,clearance,deadline_miss,collision\n";
     for (const auto& sample : result.samples) {
       csv << sample.time;
       for (size_t i = 0; i < sample.states.size(); ++i) {
@@ -30,12 +30,16 @@ int main(int argc, char** argv) {
             << x(mpcpark::kDelta) << ',' << u(mpcpark::kAccel) << ','
             << u(mpcpark::kSteerRate);
       }
-      csv << ',' << sample.solve_ms << ',' << sample.collision << '\n';
+      csv << ',' << sample.solve_ms << ',' << sample.clearance << ','
+          << sample.deadline_miss << ',' << sample.collision << '\n';
     }
 
     std::cout << std::fixed << std::setprecision(3)
               << "samples=" << result.samples.size()
               << " mean_coordination_ms=" << result.mean_round_ms
+              << " max_coordination_ms=" << result.max_round_ms
+              << " deadline_misses=" << result.deadline_misses
+              << " min_clearance_m=" << result.min_clearance
               << " collision=" << result.collision
               << " success=" << result.success;
     for (size_t i = 0; i < result.final_errors.size(); ++i) {

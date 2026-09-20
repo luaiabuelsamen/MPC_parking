@@ -1,5 +1,6 @@
 CXX_FLAGS = [
     "-std=c++17",
+    "-pthread",
     "-Wall",
     "-Wextra",
     "-Wpedantic",
@@ -41,6 +42,13 @@ cxx_binary(
 cxx_binary(
     name = "distributed_ilqr",
     srcs = ["apps/distributed_ilqr.cpp"],
+    compiler_flags = CXX_FLAGS,
+    deps = [":mpcpark"],
+)
+
+cxx_binary(
+    name = "distributed_stress",
+    srcs = ["apps/distributed_stress.cpp"],
     compiler_flags = CXX_FLAGS,
     deps = [":mpcpark"],
 )

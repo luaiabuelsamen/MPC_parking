@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <future>
 #include <stdexcept>
 
 #include "mpcpark/planner.hpp"
@@ -109,6 +110,7 @@ DistributedResult simulate_distributed_ilqr(
   }
 
   DistributedResult result;
+  result.min_clearance = 1e100;
   double total_round_ms = 0.0;
   int total_rounds = 0;
   const int max_steps = reference_steps + options.settle_steps + 180;
@@ -146,71 +148,100 @@ DistributedResult simulate_distributed_ilqr(
       if (!done[i]) ++active_agents;
     }
     const auto round_start = clock::now();
-    double solve_ms = 0.0;
     const int rounds = active_agents > 1 ? options.coordination_rounds : 1;
     for (int round = 0; round < rounds; ++round) {
+      const auto prediction_snapshot = predictions;
+      std::vector<std::future<Solution>> futures(count);
+      std::vector<bool> launched(count, false);
       for (int i = 0; i < count; ++i) {
         if (done[i]) {
           candidates[i].assign(options.mpc_horizon, VecU{});
           predictions[i].assign(options.mpc_horizon + 1, states[i]);
           continue;
         }
-        Problem problem;
-        problem.vehicle = scenario.agents[i].vehicle;
-        problem.obstacles = scenario.static_obstacles;
-        problem.dt = options.dt;
-        problem.horizon = options.mpc_horizon;
-        problem.xref.resize(problem.horizon + 1);
-        problem.dynamic_obstacles.resize(problem.horizon + 1);
-        const int last_ref = static_cast<int>(active_references[i].xs.size()) - 1;
-        for (int k = 0; k <= problem.horizon; ++k) {
-          problem.xref[k] = active_references[i].xs[
-              std::min(cursors[i] + k, last_ref)];
-          for (int other = 0; other < count; ++other) {
-            if (other == i) continue;
-            problem.dynamic_obstacles[k].push_back(vehicle_rect(
-                scenario.agents[other].vehicle, predictions[other][k],
-                scenario.agents[other].name));
+        launched[i] = true;
+        futures[i] = std::async(std::launch::async, [&, i]() {
+          Problem problem;
+          problem.vehicle = scenario.agents[i].vehicle;
+          problem.obstacles = scenario.static_obstacles;
+          problem.dt = options.dt;
+          problem.horizon = options.mpc_horizon;
+          problem.xref.resize(problem.horizon + 1);
+          problem.dynamic_obstacles.resize(problem.horizon + 1);
+          const int last_ref =
+              static_cast<int>(active_references[i].xs.size()) - 1;
+          for (int k = 0; k <= problem.horizon; ++k) {
+            problem.xref[k] = active_references[i].xs[
+                std::min(cursors[i] + k, last_ref)];
+            for (int other = 0; other < count; ++other) {
+              if (other == i) continue;
+              problem.dynamic_obstacles[k].push_back(vehicle_rect(
+                  scenario.agents[other].vehicle,
+                  prediction_snapshot[other][k], scenario.agents[other].name));
+            }
           }
-        }
-        problem.weights.pos = i == 0 ? 8.0 : 7.0;
-        problem.weights.yaw = i == 0 ? 10.0 : 8.0;
-        problem.weights.v = 0.6;
-        problem.weights.delta = 0.8;
-        problem.weights.accel = 0.35;
-        problem.weights.steer_rate = 0.4;
-        problem.weights.term_pos = 2500.0;
-        problem.weights.term_yaw = 3000.0;
-        problem.weights.term_v = 300.0;
-        problem.options.max_inner = options.max_inner_iterations;
-        problem.options.max_outer = options.max_outer_iterations;
-        problem.options.mu_init = 50.0;
-        problem.options.safety_margin = i == 0 ? 0.05 : 0.70;
-        ParkingSolver controller(std::move(problem));
-        const Solution solution = controller.solve(states[i], warm[i]);
+          problem.weights.pos = i == 0 ? 8.0 : 7.0;
+          problem.weights.yaw = i == 0 ? 10.0 : 8.0;
+          problem.weights.v = 0.6;
+          problem.weights.delta = 0.8;
+          problem.weights.accel = 0.35;
+          problem.weights.steer_rate = 0.4;
+          problem.weights.term_pos = 2500.0;
+          problem.weights.term_yaw = 3000.0;
+          problem.weights.term_v = 300.0;
+          problem.options.max_inner = options.max_inner_iterations;
+          problem.options.max_outer = options.max_outer_iterations;
+          problem.options.mu_init = 50.0;
+          problem.options.safety_margin = i == 0 ? 0.05 : 0.70;
+          ParkingSolver controller(std::move(problem));
+          return controller.solve(states[i], warm[i]);
+        });
+      }
+      for (int i = 0; i < count; ++i) {
+        if (!launched[i]) continue;
+        const Solution solution = futures[i].get();
         candidates[i] = solution.us;
         predictions[i] = solution.xs;
-        solve_ms += solution.stats.solve_ms;
       }
     }
-    total_round_ms += std::chrono::duration<double, std::milli>(
-                          clock::now() - round_start).count();
+    const double coordination_ms = std::chrono::duration<double, std::milli>(
+                                       clock::now() - round_start).count();
+    total_round_ms += coordination_ms;
+    result.max_round_ms = std::max(result.max_round_ms, coordination_ms);
+    const bool deadline_miss = coordination_ms > options.deadline_ms;
+    if (deadline_miss) ++result.deadline_misses;
     ++total_rounds;
 
     bool collision = false;
+    double clearance = 1e100;
     for (int i = 0; i < count; ++i) {
       collision = collision || in_collision(scenario.agents[i].vehicle, states[i],
                                             scenario.static_obstacles);
       for (int j = i + 1; j < count; ++j) {
-        collision = collision || rects_overlap(
-            vehicle_rect(scenario.agents[i].vehicle, states[i]),
-            vehicle_rect(scenario.agents[j].vehicle, states[j]));
+        const Rect first = vehicle_rect(scenario.agents[i].vehicle, states[i]);
+        const Rect second = vehicle_rect(scenario.agents[j].vehicle, states[j]);
+        collision = collision || rects_overlap(first, second);
+        clearance = std::min(clearance, rect_distance(first, second));
       }
     }
+    result.min_clearance = std::min(result.min_clearance, clearance);
     std::vector<VecU> applied(count);
-    for (int i = 0; i < count; ++i) applied[i] = candidates[i].front();
+    for (int i = 0; i < count; ++i) {
+      if (!deadline_miss) {
+        applied[i] = candidates[i].front();
+      } else {
+        applied[i](kAccel) = clampd(-states[i](kV) / options.dt,
+                                    -scenario.agents[i].vehicle.a_max,
+                                    scenario.agents[i].vehicle.a_max);
+        applied[i](kSteerRate) = clampd(
+            -states[i](kDelta) / options.dt,
+            -scenario.agents[i].vehicle.steer_rate_max,
+            scenario.agents[i].vehicle.steer_rate_max);
+      }
+    }
     result.samples.push_back(MultiAgentSample{
-        step * options.dt, states, applied, solve_ms, collision});
+        step * options.dt, states, applied, coordination_ms, clearance,
+        deadline_miss, collision});
     result.collision = result.collision || collision;
 
     for (int i = 0; i < count; ++i) {
@@ -229,7 +260,7 @@ DistributedResult simulate_distributed_ilqr(
 
   result.samples.push_back(MultiAgentSample{
       result.samples.size() * options.dt, states, std::vector<VecU>(count), 0.0,
-      false});
+      result.min_clearance, false, false});
   for (int i = 0; i < count; ++i) {
     result.final_errors.push_back(goal_error(states[i], scenario.agents[i].goal));
   }

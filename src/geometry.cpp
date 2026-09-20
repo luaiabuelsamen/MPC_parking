@@ -1,5 +1,7 @@
 #include "mpcpark/geometry.hpp"
 
+#include <limits>
+
 namespace mpcpark {
 
 std::array<Vec2, 4> Rect::corners() const {
@@ -90,6 +92,33 @@ bool rects_overlap(const Rect& a, const Rect& b) {
     }
   }
   return true;
+}
+
+namespace {
+double point_segment_distance(const Vec2& p, const Vec2& a, const Vec2& b) {
+  const double vx = b(0) - a(0), vy = b(1) - a(1);
+  const double wx = p(0) - a(0), wy = p(1) - a(1);
+  const double vv = vx * vx + vy * vy;
+  const double t = vv > 1e-12 ? clampd((wx * vx + wy * vy) / vv, 0.0, 1.0)
+                              : 0.0;
+  return std::hypot(p(0) - (a(0) + t * vx),
+                    p(1) - (a(1) + t * vy));
+}
+}  // namespace
+
+double rect_distance(const Rect& a, const Rect& b) {
+  if (rects_overlap(a, b)) return 0.0;
+  const auto ca = a.corners(), cb = b.corners();
+  double distance = std::numeric_limits<double>::infinity();
+  for (int i = 0; i < 4; ++i) {
+    for (int j = 0; j < 4; ++j) {
+      distance = std::min(distance,
+                          point_segment_distance(ca[i], cb[j], cb[(j + 1) % 4]));
+      distance = std::min(distance,
+                          point_segment_distance(cb[i], ca[j], ca[(j + 1) % 4]));
+    }
+  }
+  return distance;
 }
 
 bool in_collision(const VehicleParams& vp, const VecX& x,

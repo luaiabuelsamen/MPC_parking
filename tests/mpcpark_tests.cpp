@@ -53,6 +53,9 @@ void test_geometry() {
   p(0) = 0.0;
   require(std::fabs(mpcpark::rect_sdf(box, p) + 1.0) < 1e-12,
           "rectangle inside distance");
+  const auto other = mpcpark::Rect::from_size(5.0, 0.0, 4.0, 2.0, 0.0);
+  require(std::fabs(mpcpark::rect_distance(box, other) - 1.0) < 1e-12,
+          "rectangle separation distance");
 }
 
 void test_dynamic_obstacle_constraints() {

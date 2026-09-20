@@ -46,6 +46,16 @@ python3 tools/render_multi_agent_gif.py \
   --output artifacts/distributed_ilqr.gif
 ```
 
+Run deterministic timing and safety stress cases with:
+
+```sh
+buck2 run //:distributed_stress
+```
+
+The controller solves the agents concurrently and applies a braking fallback
+if a coordination round exceeds the 150 ms control deadline. The stress output
+reports deadline misses, exact body clearance, and terminal success.
+
 Use `perpendicular` or `garage` for the other scenes. `--plan-only` runs just
 Hybrid A*, which is useful when tuning the search. CSV output contains the
 state and control at every time step.

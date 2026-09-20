@@ -44,5 +44,8 @@ bool in_collision(const VehicleParams& vp, const VecX& x,
 Rect vehicle_rect(const VehicleParams& vp, const VecX& x,
                   std::string label = "vehicle");
 bool rects_overlap(const Rect& a, const Rect& b);
+// Exact Euclidean separation between two rectangles; zero when they touch or
+// overlap.
+double rect_distance(const Rect& a, const Rect& b);
 
 }  // namespace mpcpark
