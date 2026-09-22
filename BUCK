@@ -20,13 +20,15 @@ cxx_library(
         "src/safety.cpp",
         "src/simulator.cpp",
         "src/trajectory.cpp",
+        "src/traffic.cpp",
         "src/vehicle.cpp",
+        "src/world.cpp",
     ],
     exported_headers = {path.removeprefix("include/"): path for path in glob(["include/**/*.hpp"])},
     header_namespace = "",
     exported_linker_flags = ["-pthread"] + SANITIZER_FLAGS,
     compiler_flags = CXX_FLAGS,
-    tests = [":mpcpark_tests", ":safety_tests"],
+    tests = [":mpcpark_tests", ":safety_tests", ":traffic_tests", ":world_tests"],
     visibility = ["PUBLIC"],
 )
 
@@ -52,6 +54,20 @@ cxx_binary(
 )
 
 cxx_binary(
+    name = "live_worker",
+    srcs = ["apps/live_worker.cpp"],
+    compiler_flags = CXX_FLAGS,
+    deps = [":mpcpark"],
+)
+
+cxx_binary(
+    name = "traffic_encounter",
+    srcs = ["apps/traffic_encounter.cpp"],
+    compiler_flags = CXX_FLAGS,
+    deps = [":mpcpark"],
+)
+
+cxx_binary(
     name = "distributed_stress",
     srcs = ["apps/distributed_stress.cpp"],
     compiler_flags = CXX_FLAGS,
@@ -61,6 +77,20 @@ cxx_binary(
 cxx_test(
     name = "mpcpark_tests",
     srcs = ["tests/mpcpark_tests.cpp"],
+    compiler_flags = CXX_FLAGS,
+    deps = [":mpcpark"],
+)
+
+cxx_test(
+    name = "world_tests",
+    srcs = ["tests/world_tests.cpp"],
+    compiler_flags = CXX_FLAGS,
+    deps = [":mpcpark"],
+)
+
+cxx_test(
+    name = "traffic_tests",
+    srcs = ["tests/traffic_tests.cpp"],
     compiler_flags = CXX_FLAGS,
     deps = [":mpcpark"],
 )

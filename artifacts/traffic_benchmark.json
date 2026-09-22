@@ -1,0 +1,254 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "name": "baseline",
+      "options": [],
+      "passed": true,
+      "success": true,
+      "interaction_ok": true,
+      "collision": false,
+      "safety_stop": false,
+      "priority_violations": 0,
+      "waiting_s": 16.8,
+      "parking_yield_s": 17.85,
+      "opposing_lane_s": 10.5,
+      "lane_restored": true,
+      "min_clearance_m": 0.5,
+      "min_static_clearance_m": 0.05518336,
+      "p95_ms": 21.81163,
+      "max_ms": 34.2104,
+      "deadline_misses": 0,
+      "fallback_steps": 0,
+      "solver_timeouts": 0,
+      "goal_errors": [
+        {
+          "position_m": 0.04922676,
+          "yaw_rad": 0.07786954,
+          "speed_mps": 0.02002359
+        },
+        {
+          "position_m": 0.03287933,
+          "yaw_rad": 7.13422e-05,
+          "speed_mps": 1e-323
+        },
+        {
+          "position_m": 0.02904389,
+          "yaw_rad": 0,
+          "speed_mps": 1e-323
+        }
+      ]
+    },
+    {
+      "name": "early_oncoming",
+      "options": [
+        "--oncoming-x",
+        "-5",
+        "--oncoming-speed",
+        "2"
+      ],
+      "passed": true,
+      "success": true,
+      "interaction_ok": true,
+      "collision": false,
+      "safety_stop": false,
+      "priority_violations": 0,
+      "waiting_s": 14.1,
+      "parking_yield_s": 15.15,
+      "opposing_lane_s": 10.5,
+      "lane_restored": true,
+      "min_clearance_m": 0.5,
+      "min_static_clearance_m": 0.05518336,
+      "p95_ms": 23.21158,
+      "max_ms": 30.65134,
+      "deadline_misses": 0,
+      "fallback_steps": 0,
+      "solver_timeouts": 0,
+      "goal_errors": [
+        {
+          "position_m": 0.04922676,
+          "yaw_rad": 0.07786954,
+          "speed_mps": 0.02002359
+        },
+        {
+          "position_m": 0.03287933,
+          "yaw_rad": 7.13422e-05,
+          "speed_mps": 1e-323
+        },
+        {
+          "position_m": 0.03300764,
+          "yaw_rad": 1.412204e-13,
+          "speed_mps": 2e-323
+        }
+      ]
+    },
+    {
+      "name": "late_oncoming",
+      "options": [
+        "--oncoming-x",
+        "22",
+        "--oncoming-speed",
+        "1.2"
+      ],
+      "passed": true,
+      "success": true,
+      "interaction_ok": true,
+      "collision": false,
+      "safety_stop": false,
+      "priority_violations": 0,
+      "waiting_s": 33,
+      "parking_yield_s": 34.05,
+      "opposing_lane_s": 10.5,
+      "lane_restored": true,
+      "min_clearance_m": 0.5,
+      "min_static_clearance_m": 0.05518336,
+      "p95_ms": 21.22147,
+      "max_ms": 32.50205,
+      "deadline_misses": 0,
+      "fallback_steps": 0,
+      "solver_timeouts": 0,
+      "goal_errors": [
+        {
+          "position_m": 0.04922676,
+          "yaw_rad": 0.07786954,
+          "speed_mps": 0.02002359
+        },
+        {
+          "position_m": 0.03287933,
+          "yaw_rad": 7.13422e-05,
+          "speed_mps": 1e-323
+        },
+        {
+          "position_m": 0.02385278,
+          "yaw_rad": 0,
+          "speed_mps": 1e-323
+        }
+      ]
+    },
+    {
+      "name": "fast_follower",
+      "options": [
+        "--passing-speed",
+        "2"
+      ],
+      "passed": true,
+      "success": true,
+      "interaction_ok": true,
+      "collision": false,
+      "safety_stop": false,
+      "priority_violations": 0,
+      "waiting_s": 16.8,
+      "parking_yield_s": 15.15,
+      "opposing_lane_s": 8.1,
+      "lane_restored": true,
+      "min_clearance_m": 0.5,
+      "min_static_clearance_m": 0.05518336,
+      "p95_ms": 23.55723,
+      "max_ms": 36.73812,
+      "deadline_misses": 0,
+      "fallback_steps": 0,
+      "solver_timeouts": 0,
+      "goal_errors": [
+        {
+          "position_m": 0.04922676,
+          "yaw_rad": 0.07786954,
+          "speed_mps": 0.02002359
+        },
+        {
+          "position_m": 0.03711737,
+          "yaw_rad": 0.0002141343,
+          "speed_mps": 2e-323
+        },
+        {
+          "position_m": 0.02904389,
+          "yaw_rad": 0,
+          "speed_mps": 1e-323
+        }
+      ]
+    },
+    {
+      "name": "slow_follower",
+      "options": [
+        "--passing-speed",
+        "1.2"
+      ],
+      "passed": true,
+      "success": true,
+      "interaction_ok": true,
+      "collision": false,
+      "safety_stop": false,
+      "priority_violations": 0,
+      "waiting_s": 16.8,
+      "parking_yield_s": 22.5,
+      "opposing_lane_s": 13.95,
+      "lane_restored": true,
+      "min_clearance_m": 0.5,
+      "min_static_clearance_m": 0.05518336,
+      "p95_ms": 21.65937,
+      "max_ms": 31.97708,
+      "deadline_misses": 0,
+      "fallback_steps": 0,
+      "solver_timeouts": 0,
+      "goal_errors": [
+        {
+          "position_m": 0.04922676,
+          "yaw_rad": 0.07786954,
+          "speed_mps": 0.02002359
+        },
+        {
+          "position_m": 0.01794344,
+          "yaw_rad": 1.933047e-05,
+          "speed_mps": 1e-323
+        },
+        {
+          "position_m": 0.02904389,
+          "yaw_rad": 0,
+          "speed_mps": 1e-323
+        }
+      ]
+    },
+    {
+      "name": "dropped_results",
+      "options": [
+        "--fault-step",
+        "140"
+      ],
+      "passed": true,
+      "success": true,
+      "interaction_ok": true,
+      "collision": false,
+      "safety_stop": false,
+      "priority_violations": 0,
+      "waiting_s": 16.8,
+      "parking_yield_s": 18,
+      "opposing_lane_s": 10.35,
+      "lane_restored": true,
+      "min_clearance_m": 0.5,
+      "min_static_clearance_m": 0.05518336,
+      "p95_ms": 22.17139,
+      "max_ms": 34.82747,
+      "deadline_misses": 0,
+      "fallback_steps": 3,
+      "solver_timeouts": 0,
+      "goal_errors": [
+        {
+          "position_m": 0.04922676,
+          "yaw_rad": 0.07786954,
+          "speed_mps": 0.02002359
+        },
+        {
+          "position_m": 0.03287933,
+          "yaw_rad": 7.134219e-05,
+          "speed_mps": 1e-323
+        },
+        {
+          "position_m": 0.02904389,
+          "yaw_rad": 0,
+          "speed_mps": 1e-323
+        }
+      ]
+    }
+  ],
+  "passed": 6,
+  "total": 6
+}

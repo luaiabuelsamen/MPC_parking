@@ -24,6 +24,22 @@ struct PassingScenario {
   std::vector<TrafficAgent> agents;
   std::vector<Rect> static_obstacles;
   double xmin = -14.0, xmax = 14.0, ymin = -5.5, ymax = 5.5;
+  // Three-car encounter: agents are parking, passing, and oncoming.
+  bool negotiate_pass = false;
+};
+
+enum class PassPhase { Waiting, Passing, Returning, Complete };
+const char* phase_name(PassPhase phase);
+
+// A conservative right-of-way protocol over broadcast measured states.
+// It admits a pass only after oncoming traffic has physically cleared and
+// the parking car acknowledges a stop before its reverse manoeuvre.
+struct PassNegotiation {
+  PassPhase phase = PassPhase::Waiting;
+  bool parking_hold = false;
+  bool parking_released = false;
+  void update(const PassingScenario& scenario, const std::vector<VecX>& states,
+              bool parking_near_reverse);
 };
 
 struct DistributedOptions {
@@ -70,6 +86,8 @@ struct MultiAgentSample {
   bool collision = false;
   bool fallback = false;
   int rounds = 0;
+  std::vector<std::string> modes;
+  std::vector<std::vector<VecX>> predictions;
 };
 
 struct DistributedResult {
@@ -92,6 +110,7 @@ struct DistributedResult {
 };
 
 PassingScenario make_parallel_parking_traffic_scenario();
+PassingScenario make_oncoming_traffic_scenario();
 std::vector<ReferenceTrajectory> plan_agent_references(
     const PassingScenario& scenario, double dt = 0.15);
 DistributedResult simulate_distributed_ilqr(

@@ -33,6 +33,40 @@ std::vector<VecX> rollout(const TrafficAgent& agent, const VecX& initial,
   return states;
 }
 
+// Lane-change geometry provides the homotopy that a local iLQR solve cannot
+// reliably invent. Quintic blends have zero slope/curvature at both ends.
+Plan passing_route(const PlanRequest& request) {
+  Plan plan;
+  const double start = request.start(kPx), end = request.goal(kPx);
+  if (start + 10 > 7 || end < 17)
+    throw std::invalid_argument("insufficient road length for passing route");
+  const int segments = static_cast<int>(std::ceil((end - start) / 0.1));
+  for (int i = 0; i <= segments; ++i) {
+    const double x = start + (end - start) * i / segments;
+    const bool entering = x < start + 10;
+    const bool leaving = x > 7;
+    // Offset inside the opposing lane leaves room for the front-corner
+    // sweep during the turn beside the road's outer boundary.
+    double y = 6.0, slope = 0, second = 0;
+    if (entering || leaving) {
+      const double t = clampd((x - (entering ? start : 7)) / 10, 0, 1);
+      const double sign = entering ? 1 : -1;
+      const double blend = t*t*t*(10 + t*(-15 + 6*t));
+      y = (entering ? 3.2 : 6.0) + sign * 2.8 * blend;
+      slope = sign * 2.8 / 10 * 30*t*t*(1-t)*(1-t);
+      second = sign * 2.8 / 100 * 60*t*(1-t)*(1-2*t);
+    }
+    const double yaw = std::atan(slope);
+    const double steer = std::atan(request.vehicle.wheelbase * second /
+                                   std::pow(1 + slope*slope, 1.5));
+    if (std::fabs(steer) > request.vehicle.delta_max || !pose_is_free(request, x, y, yaw))
+      throw std::runtime_error("passing route is infeasible for this vehicle");
+    plan.poses.push_back(PlanPose{x, y, yaw, 1, steer});
+  }
+  plan.success = true;
+  return plan;
+}
+
 }  // namespace
 
 PassingScenario make_parallel_parking_traffic_scenario() {
@@ -57,7 +91,8 @@ PassingScenario make_parallel_parking_traffic_scenario() {
 std::vector<ReferenceTrajectory> plan_agent_references(
     const PassingScenario& scenario, double dt) {
   std::vector<ReferenceTrajectory> references;
-  for (const TrafficAgent& agent : scenario.agents) {
+  for (size_t i = 0; i < scenario.agents.size(); ++i) {
+    const TrafficAgent& agent = scenario.agents[i];
     PlanRequest request;
     request.vehicle = agent.vehicle;
     request.obstacles = scenario.static_obstacles;
@@ -66,7 +101,8 @@ std::vector<ReferenceTrajectory> plan_agent_references(
     request.ymin = scenario.ymin; request.ymax = scenario.ymax;
     PlannerOptions planner_options;
     planner_options.max_expansions = 500000;
-    const Plan plan = hybrid_astar(request, planner_options);
+    const Plan plan = scenario.negotiate_pass && i == 1 ? passing_route(request) :
+        hybrid_astar(request, planner_options);
     if (!plan.success) {
       throw std::runtime_error("failed to plan reference for " + agent.name);
     }
@@ -88,6 +124,8 @@ DistributedResult simulate_distributed_ilqr(
   if (count < 2 || static_cast<int>(references.size()) != count) {
     throw std::invalid_argument("distributed simulation requires matching agents and references");
   }
+  if (scenario.negotiate_pass && count != 3)
+    throw std::invalid_argument("negotiated encounter requires three agents");
   if (!std::isfinite(options.dt) || options.dt <= 0 || options.mpc_horizon < 2 ||
       options.coordination_rounds < 1 || options.integration_substeps < 1 ||
       options.max_inner_iterations < 1 || options.max_outer_iterations < 1 ||
@@ -154,6 +192,7 @@ DistributedResult simulate_distributed_ilqr(
   int total_rounds = 0;
   int exchanges = 0;
   int parking_tick = 0;
+  PassNegotiation negotiation;
   const int max_steps = options.max_steps > 0 ? options.max_steps :
       reference_steps + options.settle_steps + 180;
   for (int step = 0; step < max_steps; ++step) {
@@ -161,6 +200,30 @@ DistributedResult simulate_distributed_ilqr(
     const auto deadline = round_start + std::chrono::duration_cast<clock::duration>(
         std::chrono::duration<double, std::milli>(options.deadline_ms * 0.9));
     std::vector<bool> done(count, false);
+    std::vector<bool> held(count, false);
+    std::vector<std::string> modes(count, "DRIVE");
+    if (scenario.negotiate_pass) {
+      bool near_reverse = false;
+      const auto& ref = references[0].xs;
+      for (int k = parking_tick; k <= std::min(parking_tick + 6, static_cast<int>(ref.size()) - 1); ++k)
+        near_reverse = near_reverse || ref[k](kV) < -0.05;
+      negotiation.update(scenario, states, near_reverse);
+      held[0] = negotiation.parking_hold;
+      held[1] = negotiation.phase == PassPhase::Waiting;
+      modes[0] = held[0] ? "YIELD_TO_PASS" : states[0](kV) < -0.05 ? "REVERSE_PARK" : "PARK";
+      modes[1] = phase_name(negotiation.phase);
+      modes[2] = "RIGHT_OF_WAY";
+      // Publish stopping intent before the Jacobi snapshot, so all peers see
+      // a newly yielding vehicle's actual reachable braking trajectory.
+      for (int i = 0; i < count; ++i) if (held[i]) {
+        VecX stopped = states[i];
+        for (int k = 0; k < options.mpc_horizon; ++k) {
+          warm[i][k] = braking_control(scenario.agents[i].vehicle, stopped, options.dt);
+          stopped = step_rk4(scenario.agents[i].vehicle, stopped, warm[i][k], options.dt);
+        }
+        predictions[i] = rollout(scenario.agents[i], states[i], warm[i], options.dt);
+      }
+    }
     int active_agents = 0;
     for (int i = 0; i < count; ++i) {
       const int last_ref = static_cast<int>(active_references[i].xs.size()) - 1;
@@ -190,6 +253,7 @@ DistributedResult simulate_distributed_ilqr(
       }
       done[i] = cursors[i] >= last_ref - 1 &&
                 at_goal(scenario.agents[i], states[i]);
+      if (done[i]) modes[i] = "DONE";
       if (!done[i]) ++active_agents;
     }
     const int rounds = active_agents > 1 ? options.coordination_rounds : 1;
@@ -200,7 +264,7 @@ DistributedResult simulate_distributed_ilqr(
       std::vector<std::future<Solution>> futures(count);
       std::vector<bool> launched(count, false);
       for (int i = 0; i < count; ++i) {
-        if (done[i]) {
+        if (done[i] || held[i]) {
           VecX stopped = states[i];
           for (int k = 0; k < options.mpc_horizon; ++k) {
             candidates[i][k] = braking_control(scenario.agents[i].vehicle, stopped, options.dt);
@@ -242,7 +306,7 @@ DistributedResult simulate_distributed_ilqr(
           problem.options.max_inner = options.max_inner_iterations;
           problem.options.max_outer = options.max_outer_iterations;
           problem.options.mu_init = 50.0;
-          problem.options.safety_margin = i == 0 ? 0.05 : 0.70;
+          problem.options.safety_margin = i == 0 ? 0.05 : scenario.negotiate_pass ? 0.20 : 0.70;
           ParkingSolver controller(std::move(problem));
           return controller.solve(states[i], warm[i], deadline);
         });
@@ -315,14 +379,15 @@ DistributedResult simulate_distributed_ilqr(
     result.min_static_clearance = std::min(result.min_static_clearance, checked.min_static_clearance);
     result.samples.push_back(MultiAgentSample{
         step * options.dt, states, applied, coordination_ms, checked.min_clearance,
-        deadline_miss, checked.collision, fallback, executed_rounds});
+        deadline_miss, checked.collision, fallback, executed_rounds, modes,
+        scenario.negotiate_pass ? predictions : std::vector<std::vector<VecX>>{}});
     result.collision = result.collision || checked.collision;
     states = std::move(checked.states);
     if (!checked.safe()) {
       result.safety_stop = true;
       break;
     }
-    if (!fallback) ++parking_tick;
+    if (!fallback && !held[0]) ++parking_tick;
     for (int i = 0; i < count; ++i) {
       for (int k = 0; k + 1 < options.mpc_horizon; ++k) {
         warm[i][k] = fallback ? VecU{} : candidates[i][k + 1];
@@ -354,7 +419,8 @@ DistributedResult simulate_distributed_ilqr(
   result.collision = result.collision || final_collision;
   result.samples.push_back(MultiAgentSample{
       result.samples.size() * options.dt, states, std::vector<VecU>(count), 0.0,
-      final_clearance, false, final_collision});
+      final_clearance, false, final_collision, false, 0,
+      std::vector<std::string>(count, "END"), {}});
   for (int i = 0; i < count; ++i) {
     result.final_errors.push_back(goal_error(states[i], scenario.agents[i].goal));
   }
