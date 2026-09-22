@@ -7,27 +7,38 @@ from pathlib import Path
 
 
 def render_gif(data, path):
+    import sys
+
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.animation import FuncAnimation, PillowWriter
     from matplotlib.patches import Polygon
 
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import labstyle as ls
+
     samples, agents = data["samples"], data["agents"]
-    colors = ["#56caff", "#ff7899", "#ffc66a"]
-    bg, text, muted = "#0b121b", "#edf3f9", "#9cacc0"
-    fig = plt.figure(figsize=(12, 5.8), facecolor=bg)
-    ax = fig.add_axes((.025, .24, .95, .52))
+    colors = ls.SERIES[:3]
+    ls.use()
+    fig = plt.figure(figsize=(12, 5.4))
+    ax = fig.add_axes((.03, .30, .94, .50))
     ax.set(xlim=(-27, 27), ylim=(-2.6, 10.5), aspect="equal")
-    ax.set_facecolor("#263849")
+    ax.set_facecolor(ls.FIELD)
     ax.set_xticks([]); ax.set_yticks([])
     for spine in ax.spines.values(): spine.set_visible(False)
-    ax.axhline(4.8, color="#c8b870", linestyle="--", lw=1)
-    ax.axhline(8, color=muted, lw=1)
-    ax.axhspan(-2.6, -1.4, color="#34485a")
-    ax.axhspan(8, 10.5, color="#142231")
-    ax.text(-25, 8.7, "ONCOMING  ←", color=muted, fontsize=9)
-    ax.text(16, 1.7, "TRAVEL  →", color=muted, fontsize=9)
+
+    # Road furniture is greyscale throughout; colour only identifies an agent.
+    ax.axhspan(-1.4, 8.0, color=ls.ROAD, zorder=0)
+    ax.axhspan(-2.6, -1.4, color=ls.CURB, zorder=0)
+    ax.axhspan(8.0, 10.5, color=ls.CURB, zorder=0)
+    ax.axhline(4.8, color=ls.RULE_2, linestyle=(0, (5, 5)), lw=1, zorder=1)
+    ax.axhline(8, color=ls.RULE_2, lw=1, zorder=1)
+    ax.axhline(1.3, color=ls.RULE, linestyle=(0, (1.5, 4)), lw=1, zorder=1)
+    # Kept clear of the lane itself: the oncoming vehicle sweeps its full length.
+    ax.text(-26, 8.7, "opposing lane  \u2190", color=ls.FAINT, fontsize=8, family=ls.MONO)
+    ax.text(-26, 1.8, "travel lane  \u2192", color=ls.FAINT, fontsize=8, family=ls.MONO)
+    ax.text(-2.4, -2.3, "parking bay", color=ls.FAINT, fontsize=8, family=ls.MONO)
 
     def corners(x, y, yaw, length, width, rear):
         c, s = math.cos(yaw), math.sin(yaw)
@@ -37,46 +48,55 @@ def render_gif(data, path):
 
     for x, y, length, width, yaw in data["obstacles"][:2]:
         ax.add_patch(Polygon(corners(x, y, yaw, length, width, length/2),
-                             facecolor="#455261", edgecolor=muted))
+                             facecolor=ls.OBSTACLE, edgecolor=ls.OBSTACLE_LINE,
+                             lw=1.0, zorder=2))
     ax.add_patch(Polygon(corners(-1.25, 0, 0, 4.5, 1.8, 1), fill=False,
-                         edgecolor="#6fe1bb", linestyle="--", lw=1.5))
-    fig.text(.04, .92, "SHARED STREET", color="#6fe1bb", fontsize=10, weight="bold")
-    fig.text(.04, .86, "Parallel parking meets oncoming traffic", color=text, fontsize=23, weight="bold")
-    phase = fig.text(.04, .79, "", color=text, fontsize=12)
-    clock = fig.text(.95, .91, "", color=text, fontsize=14, ha="right", family="monospace")
-    cars, trails, predictions, labels = [], [], [], []
+                         edgecolor=ls.RULE_2, linestyle=(0, (4, 3)), lw=1.2, zorder=2))
+
+    fig.text(.03, .945, "Shared-street encounter", color=ls.INK, fontsize=13)
+    phase = fig.text(.03, .895, "", color=ls.MUTED, fontsize=10)
+    clock = fig.text(.97, .94, "", color=ls.INK, fontsize=13, ha="right", family=ls.MONO)
+    cars, trails, predictions, labels, values = [], [], [], [], []
     for i, a in enumerate(agents):
         car = Polygon(corners(0, 0, 0, a["length"], a["width"], a["rear_overhang"]),
-                      facecolor=colors[i], edgecolor=bg, lw=1.5, zorder=5)
+                      facecolor=ls.fill(colors[i]), edgecolor=colors[i], lw=1.4, zorder=5)
         ax.add_patch(car); cars.append(car)
-        trail, = ax.plot([], [], color=colors[i], alpha=.55, lw=1.5)
-        pred, = ax.plot([], [], color=colors[i], linestyle=":", lw=1.5)
+        trail, = ax.plot([], [], color=colors[i], lw=1.5)
+        pred, = ax.plot([], [], color=colors[i], linestyle=(0, (1.5, 3)), lw=1.4)
         trails.append(trail); predictions.append(pred)
-        labels.append(fig.text(.04+i*.32, .17, "", color=colors[i], fontsize=11, linespacing=1.6))
-    status = fig.text(.04, .065, "", color=muted, fontsize=10)
-    fig.text(.04, .025, "Kinematic simulation · dotted lines: proposed MPC horizons · sampled collision checks", color=muted, fontsize=8)
+        # A colour chip carries identity so the text can stay in ink tokens.
+        x = .03 + i * .32
+        ls.swatch(fig, x, .205, colors[i])
+        fig.text(x + .017, .20, a["name"], color=ls.INK, fontsize=10)
+        values.append(fig.text(x + .017, .145, "", color=ls.MUTED, fontsize=9, family=ls.MONO))
+        labels.append(fig.text(x + .017, .095, "", color=ls.MUTED, fontsize=9))
+    status = fig.text(.03, .035, "", color=ls.FAINT, fontsize=8, family=ls.MONO)
+    fig.text(.97, .035, "Kinematic simulation \u00b7 dotted: proposed MPC horizons "
+             "\u00b7 sampled collision checks", color=ls.FAINT, fontsize=8, ha="right")
     indices = list(range(0, len(samples), max(1, len(samples)//160)))
     if indices[-1] != len(samples)-1: indices.append(len(samples)-1)
+
     def update(frame):
         k = indices[frame]; sample = samples[k]
         clock.set_text(f"{sample['t']:5.1f} s")
         mode = sample["modes"][1]
-        titles = {"WAIT_FOR_GAP": "01 / Wait for oncoming traffic and the parking car’s stop",
-                  "PASS": "02 / Pass granted — parking car holds before reversing",
-                  "RETURN": "03 / Follower clears — parking car resumes its manoeuvre",
-                  "LANE_RESTORED": "04 / Follower back in lane — parking continues",
-                  "DONE": "05 / Through traffic complete — finishing the parking manoeuvre",
+        titles = {"WAIT_FOR_GAP": "Oncoming traffic has priority; the follower holds its lane",
+                  "PASS": "Pass granted \u2014 the parking vehicle holds before reversing",
+                  "RETURN": "The follower clears \u2014 the parking vehicle resumes",
+                  "LANE_RESTORED": "The follower is back in lane; parking continues",
+                  "DONE": "Through traffic complete; finishing the parking manoeuvre",
                   "END": "Encounter complete" if data["summary"]["success"] else "Encounter incomplete"}
-        phase.set_text(titles.get(mode, mode))
+        phase.set_text(titles.get(mode, mode.replace("_", " ").lower()))
         for i, a in enumerate(agents):
             x = sample["states"][i]
             cars[i].set_xy(corners(x[0], x[1], x[2], a["length"], a["width"], a["rear_overhang"]))
             trails[i].set_data([s["states"][i][0] for s in samples[:k+1]], [s["states"][i][1] for s in samples[:k+1]])
             pred = sample["predictions"][i] if sample["predictions"] else []
             predictions[i].set_data([p[0] for p in pred], [p[1] for p in pred])
-            labels[i].set_text(f"{a['name'].upper()}  /  {x[3]:+.2f} m/s\n{sample['modes'][i].replace('_', ' ').lower()}")
-        status.set_text(f"Body clearance  {sample['clearance']:.2f} m     |     Decision  {sample['ms']:.1f} ms     |     "
-                        f"{'BRAKING FALLBACK' if sample['fallback'] else 'Controller in the loop'}")
+            values[i].set_text(f"{x[3]:+.2f} m/s")
+            labels[i].set_text(sample["modes"][i].replace("_", " ").lower())
+        status.set_text(f"clearance {sample['clearance']:.2f} m     decision {sample['ms']:.1f} ms     "
+                        f"{'braking fallback' if sample['fallback'] else 'controller in the loop'}")
     animation = FuncAnimation(fig, update, frames=len(indices), interval=1000/12)
     path.parent.mkdir(parents=True, exist_ok=True)
     animation.save(path, writer=PillowWriter(fps=12))
