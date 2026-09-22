@@ -91,7 +91,6 @@ def main():
     ax.set(xlim=(xmin, xmax), ylim=(ymin, ymax), aspect="equal",
            xlabel="x [m]", ylabel="y [m]")
     ax.grid(color=ls.GRID, linewidth=0.6)
-    # Scene furniture stays greyscale; colour is reserved for the vehicle.
     for cx, cy, length, width, yaw, _ in scene["obstacles"]:
         ax.add_patch(Polygon(rectangle(cx, cy, length, width, yaw), closed=True,
                              facecolor=ls.OBSTACLE, edgecolor=ls.OBSTACLE_LINE, linewidth=1.0))
@@ -106,11 +105,9 @@ def main():
                   closed=True, facecolor=ls.fill(ls.SERIES[0]), edgecolor=ls.SERIES[0],
                   linewidth=1.4, zorder=5)
     ax.add_patch(car)
-    # Legend sits on the header line so it never covers the scene.
     ax.legend(loc="lower right", bbox_to_anchor=(1, 1.01), ncols=2)
 
     fig.text(.07, .945, f"Closed-loop MPC · {args.scenario} parking", fontsize=12, color=ls.INK)
-    # The readout lives in the margin instead of a boxed overlay on the scene.
     status = fig.text(.07, .90, "", fontsize=9, color=ls.MUTED, family=ls.MONO)
     flag = fig.text(.98, .90, "", fontsize=9, color=ls.SERIES[7], family=ls.MONO, ha="right")
     fig.text(.07, .045, "Kinematic simulation · measured software timing, not a hard "
@@ -125,7 +122,6 @@ def main():
         trail.set_data(xs[:i + 1], ys[:i + 1])
         car.set_xy(rectangle(xs[i], ys[i], 4.5, 1.8, float(row["yaw"]), rear_axle=True))
         collision = int(row["collision"])
-        # State is named as well as coloured, so it never rides on colour alone.
         car.set_edgecolor(ls.SERIES[7] if collision else ls.SERIES[0])
         car.set_facecolor(ls.fill(ls.SERIES[7] if collision else ls.SERIES[0]))
         flag.set_text("COLLISION" if collision else "")

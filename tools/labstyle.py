@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
-"""Shared figure styling for every rendered artifact.
+"""Shared figure styling, mirroring the CSS custom properties in tools/*.html.
 
-One visual language across the matplotlib figures and the two HTML pages:
-neutral paper ground, hairline rules, monospace tabular numerics, and colour
-reserved for agents. The categorical palettes below pass all six checks of the
-dataviz palette validator (lightness band, chroma floor, CVD separation,
-normal-vision floor, contrast) against their respective surfaces.
+Colour identifies an agent and nothing else; scene furniture and single-series
+bars stay greyscale. Both palettes were checked against their surfaces for
+lightness, chroma, contrast, and colour-vision separation.
 """
 
-# Ink and surface tokens; mirrored by the CSS custom properties in tools/*.html.
 BG = "#fffffe"
 FIELD = "#fcfcfa"
 INK = "#16160f"
@@ -18,7 +15,6 @@ RULE = "#dcdcd5"
 RULE_2 = "#a9a9a0"
 GRID = "#e2e2db"
 
-# Scene furniture stays greyscale so colour only ever means "agent".
 ROAD = "#f2f2ed"
 CURB = "#e6e6df"
 OBSTACLE = "#e3e3dc"
@@ -80,10 +76,7 @@ def use():
 
 
 def swatch(fig, x, y, color, size=0.009):
-    """A small filled square in figure coordinates, for direct labelling.
-
-    Identity rides on the mark so the adjacent text can stay in ink tokens.
-    """
+    """A small filled square in figure coordinates, for direct labelling."""
     from matplotlib.patches import Rectangle
     aspect = fig.get_figwidth() / fig.get_figheight()
     fig.patches.append(Rectangle((x, y), size, size * aspect, transform=fig.transFigure,

@@ -1,0 +1,6 @@
+# Generated output: rendered replays, figures, and telemetry. Keeps them out of
+# the language stats and collapses them in diffs.
+artifacts/** linguist-generated=true
+
+# Vendored Buck2 prelude and build output.
+buck-out/** linguist-vendored=true

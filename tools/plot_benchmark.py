@@ -27,7 +27,6 @@ def main():
     ls.use()
     fig, (latency, clearance) = plt.subplots(1, 2, figsize=(12, 6.4), sharey=True)
 
-    # Two series of one measure; fixed colour order, legend plus an axis title.
     latency.barh(indices - .18, [c["p95_ms"] for c in cases], .28,
                  label="p95", color=ls.SERIES[0])
     latency.barh(indices + .18, [c["max_ms"] for c in cases], .28,
@@ -43,14 +42,11 @@ def main():
     latency.set_title("Decision latency")
     latency.legend(loc="lower right", ncols=2)
 
-    # One series: the title names it, so the bars stay a neutral ink tone and
-    # colour is spent only on the cases that need attention.
     values = [c["min_clearance_m"] or 0 for c in cases]
     states = ["complete" if c["success"] else "safety stop" if c["safety_stop"] else "incomplete"
               for c in cases]
     colors = [ls.MUTED if c["success"] else ls.SERIES[1] for c in cases]
     clearance.barh(indices, values, .56, color=colors)
-    # Label the exceptions only, never every bar.
     for i, (case, state) in enumerate(zip(cases, states)):
         notes = [] if case["success"] else [state]
         if case["fallback_steps"]:

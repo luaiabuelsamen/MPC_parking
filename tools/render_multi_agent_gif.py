@@ -48,7 +48,6 @@ def main():
            xlabel="road position x [m]", ylabel="lateral position y [m]")
     ax.grid(False)
 
-    # Road furniture, all greyscale: colour only ever identifies an agent.
     ax.axhspan(-1.4, 8.0, color=ls.ROAD, zorder=0)
     ax.axhspan(-2.4, -1.4, color=ls.CURB, zorder=0)
     ax.axhspan(8.0, 10.5, color=ls.CURB, zorder=0)
@@ -85,7 +84,6 @@ def main():
 
     fig.text(.07, .935, "Distributed iLQR · passing a parallel-parking vehicle",
              fontsize=12, color=ls.INK)
-    # Readout in the margin rather than a boxed overlay on the scene.
     status = fig.text(.07, .885, "", fontsize=9, color=ls.MUTED, family=ls.MONO)
     flag = fig.text(.98, .885, "", fontsize=9, color=ls.SERIES[7], family=ls.MONO, ha="right")
     fig.text(.07, .04, "Kinematic simulation · sampled collision checks · measured software "
@@ -106,7 +104,6 @@ def main():
                         f"coordination {float(row['solve_ms']):5.1f} ms     "
                         f"clearance {float(row['clearance']):4.2f} m     "
                         f"mode {'braking fallback' if fallback else 'MPC'}")
-        # Exceptions are named, not signalled by colour alone.
         flag.set_text("COLLISION" if collision else "")
         return tuple(trails + cars + [status, flag])
 

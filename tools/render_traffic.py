@@ -28,7 +28,6 @@ def render_gif(data, path):
     ax.set_xticks([]); ax.set_yticks([])
     for spine in ax.spines.values(): spine.set_visible(False)
 
-    # Road furniture is greyscale throughout; colour only identifies an agent.
     ax.axhspan(-1.4, 8.0, color=ls.ROAD, zorder=0)
     ax.axhspan(-2.6, -1.4, color=ls.CURB, zorder=0)
     ax.axhspan(8.0, 10.5, color=ls.CURB, zorder=0)
@@ -64,7 +63,6 @@ def render_gif(data, path):
         trail, = ax.plot([], [], color=colors[i], lw=1.5)
         pred, = ax.plot([], [], color=colors[i], linestyle=(0, (1.5, 3)), lw=1.4)
         trails.append(trail); predictions.append(pred)
-        # A colour chip carries identity so the text can stay in ink tokens.
         x = .03 + i * .32
         ls.swatch(fig, x, .205, colors[i])
         fig.text(x + .017, .20, a["name"], color=ls.INK, fontsize=10)
